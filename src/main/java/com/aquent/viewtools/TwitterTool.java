@@ -1,5 +1,8 @@
 package com.aquent.viewtools;
 
+import com.dotcms.security.apps.AppSecrets;
+import com.dotcms.security.apps.Secret;
+import io.vavr.control.Try;
 import org.apache.velocity.tools.view.tools.ViewTool;
 
 import com.dotmarketing.beans.Host;
@@ -16,6 +19,9 @@ import twitter4j.TwitterException;
 import twitter4j.TwitterFactory;
 import twitter4j.User;
 import twitter4j.conf.ConfigurationBuilder;
+
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Exposes Twitter4J to dotCMS in a viewtool
@@ -40,33 +46,44 @@ public class TwitterTool implements ViewTool {
 			Logger.error(this, "Unable to get the default host", e);
 			return;
 		}
-		
+
 		Logger.debug(this, "Default Host = "+defaultHost.getHostname());
+
+		final Optional<AppSecrets> appSecrets = Try.of(
+				() -> APILocator.getAppsAPI().getSecrets(AppKeys.APP_KEY, true, defaultHost, APILocator.systemUser()))
+				.getOrElse(Optional.empty());
+
+		if (!appSecrets.isPresent()) {
+
+			Logger.error(this, "Unable to get config for the default host");
+			return ;
+		}
+
+		final boolean debug         = Try.of(()->appSecrets.get().getSecrets().get(AppKeys.DEBUG.key).getBoolean()).getOrElse(Boolean.FALSE);
+		final String consumerKey    = Try.of(()->appSecrets.get().getSecrets().get(AppKeys.CONSUMER_KEY.key).getString()).getOrNull();
+		final String consumerSecret = Try.of(()->appSecrets.get().getSecrets().get(AppKeys.CONSUMER_SECRET.key).getString()).getOrNull();
+		final String accessToken    = Try.of(()->appSecrets.get().getSecrets().get(AppKeys.ACCESS_TOKEN.key).getString()).getOrNull();
+		final String tokenSecret    = Try.of(()->appSecrets.get().getSecrets().get(AppKeys.TOKEN_SECRET.key).getString()).getOrNull();
 		
-		boolean debug = defaultHost.getBoolProperty("twitter4jDebug");
-		String ck = defaultHost.getStringProperty("twitter4jConsumerKey");
-		String cks = defaultHost.getStringProperty("twitter4jConsumerSecret");
-		String at = defaultHost.getStringProperty("twitter4jAccessToken");
-		String ats = defaultHost.getStringProperty("twitter4jTokenSecret");
+		Logger.debug(this, "Twitter Auth - CK="+consumerKey+", CKS="+consumerSecret+", AT="+accessToken+", ATS="+tokenSecret);
 		
-		Logger.debug(this, "Twitter Auth - CK="+ck+", CKS="+cks+", AT="+at+", ATS="+ats);
-		
-		ConfigurationBuilder cb = new ConfigurationBuilder();
+		final ConfigurationBuilder cb = new ConfigurationBuilder();
 		cb.setDebugEnabled(debug)
-		  .setOAuthConsumerKey(ck)
-		  .setOAuthConsumerSecret(cks)
-		  .setOAuthAccessToken(at)
-		  .setOAuthAccessTokenSecret(ats)
-		  .setUseSSL(true);
+		  .setOAuthConsumerKey(consumerKey)
+		  .setOAuthConsumerSecret(consumerSecret)
+		  .setOAuthAccessToken(accessToken)
+		  .setOAuthAccessTokenSecret(tokenSecret);
     	
-		Logger.debug(this, "Twitter Configuration: "+cb);
+		Logger.debug(this, "Twitter Configuration: " + cb);
 		
         try {
             twitter = new TwitterFactory(cb.build()).getInstance(); 
         } catch (Exception e) {
             Logger.error(this, "Error getting twitter instance", e);
             return;
-        }
+        } finally {
+        	appSecrets.get().destroy();
+		}
         
         inited = true;
         Logger.info(this, "Twitter Tool Started Up");
@@ -92,25 +109,31 @@ public class TwitterTool implements ViewTool {
      * See {@link twitter4j.Twitter.getUserTimeline}
      * 
      * @param screenName    The screen name to fetch the tweets for
-     * @param page			The page of results to pull, if empty 1
-     * @param count         The number of results to pull per page, if empty 20
+     * @param pageParam		The page of results to pull, if empty 1
+     * @param countParam    The number of results to pull per page, if empty 20
      * @return              A list of the last count tweets for the the screen name, or null if something went wrong
      */
-    public ResponseList<Status> getUserTimeline(String screenName, int page, int count) {
+    public ResponseList<Status> getUserTimeline(final String screenName,
+												final int pageParam,
+												final int countParam) {
         if(inited) {
-        	if(!UtilMethods.isSet(page)) page = 1;
-        	if(!UtilMethods.isSet(count)) count = 20;
-        	
+
+        	final int page  = !UtilMethods.isSet(pageParam)?pageParam:1;
+        	final int count = !UtilMethods.isSet(countParam)?countParam:20;
+
         	// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
         	if(isMiss) {
+
         		Logger.debug(this, "Miss Cached with handle: "+screenName);
         		return null;
         	}
         	
             try {
+
                 return twitter.getUserTimeline(screenName, new Paging(page, count));
             } catch (TwitterException e) {
+
                 Logger.error(this, "Error Fetching timeline for handle: "+screenName+" errorCode: "+e.getErrorCode(), e);
                 if(e.getErrorCode() == 34) {
                 	Logger.debug(this, "Adding "+screenName+" to the miss cache");
@@ -129,18 +152,21 @@ public class TwitterTool implements ViewTool {
      * 
      * See {@link twitter4j.Twitter.getUserTimeline}
      * 
-     * @param userId    The User ID to fetch the tweets for
-     * @param page		The page of results to pull, if empty 1
-     * @param count     The number of results to pull per page, if empty 20
+     * @param userId     The User ID to fetch the tweets for
+     * @param pageParam	 The page of results to pull, if empty 1
+     * @param countParam The number of results to pull per page, if empty 20
      * @return          A list of the last count tweets for the the user id, or null if something went wrong
      */
-    public ResponseList<Status> getUserTimeline(long userId, int page, int count) {
+    public ResponseList<Status> getUserTimeline(final long userId,
+												final int pageParam,
+												final int countParam) {
         if(inited) {
-        	if(!UtilMethods.isSet(page)) page = 1;
-        	if(!UtilMethods.isSet(count)) count = 20;
+
+			final int page  = !UtilMethods.isSet(pageParam)?pageParam:1;
+			final int count = !UtilMethods.isSet(countParam)?countParam:20;
         	
         	// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with userId: "+userId);
         		return null;
@@ -170,10 +196,10 @@ public class TwitterTool implements ViewTool {
      * @param screenName    The screen name to look for
      * @return              A Twitter4J User object for the screen name or null if something went wrong
      */
-    public User showUser(String screenName) {
+    public User showUser(final String screenName) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with handle: "+screenName);
         		return null;
@@ -203,10 +229,10 @@ public class TwitterTool implements ViewTool {
      * @param screenName    The screen name to look for
      * @return              A Twitter4J User object for the screen name or null if something went wrong
      */
-    public User showUser(long userId) {
+    public User showUser(final long userId) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with userId: "+userId);
         		return null;
@@ -236,10 +262,10 @@ public class TwitterTool implements ViewTool {
      * @param screenName   The screen name to get a list of follower ids for
      * @return             A list of up to 20 of the user's followers
      */
-    public PagableResponseList<User> getFollowersList(String screenName) {
+    public PagableResponseList<User> getFollowersList(final String screenName) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(screenName);
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with handle: "+screenName);
         		return null;
@@ -269,10 +295,10 @@ public class TwitterTool implements ViewTool {
      * @param userId    The userid to get a list of follower ids for
      * @return          A List of up to 20 of the user followers
      */
-    public PagableResponseList<User> getFollowersList(long userId) {
+    public PagableResponseList<User> getFollowersList(final long userId) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(userId));
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with userId: "+userId);
         		return null;
@@ -303,10 +329,10 @@ public class TwitterTool implements ViewTool {
      * @param slug				 The list's slug
      * @return					 A list of up to 20 of the list's members
      */
-    public PagableResponseList<User> getUserListMembers(String ownerScreenName, String slug) {
+    public PagableResponseList<User> getUserListMembers(final String ownerScreenName, final String slug) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(ownerScreenName);
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(ownerScreenName);
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with handle: "+ownerScreenName);
         		return null;
@@ -337,10 +363,10 @@ public class TwitterTool implements ViewTool {
      * @param slug		The list's slug
      * @return			A list of up to 20 of the list's members
      */
-    public PagableResponseList<User> getUserListMembers(long ownerId, String slug) {
+    public PagableResponseList<User> getUserListMembers(final long ownerId, final String slug) {
     	if(inited) {
     		// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(ownerId));
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(ownerId));
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with userId: "+ownerId);
         		return null;
@@ -369,17 +395,21 @@ public class TwitterTool implements ViewTool {
      * 
      * @param ownerScreenName    The list owner's screen name
      * @param slug               The list's slug
-     * @param page               The page to pull
-     * @param count              The number of items to pull per page
+     * @param pageParam          The page to pull
+     * @param countParam         The number of items to pull per page
      * @return                   A list of the last count statuses for the user's list
      */
-    public ResponseList<Status> getUserListStatuses(String ownerScreenName, String slug, int page, int count) {
+    public ResponseList<Status> getUserListStatuses(final String ownerScreenName,
+													final String slug,
+													final int pageParam,
+													final int countParam) {
     	if(inited) {
-    		if(!UtilMethods.isSet(page)) page = 1;
-        	if(!UtilMethods.isSet(count)) count = 20;
+
+			final int page  = !UtilMethods.isSet(pageParam)?pageParam:1;
+			final int count = !UtilMethods.isSet(countParam)?countParam:20;
         	
         	// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(ownerScreenName);
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(ownerScreenName);
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with handle: "+ownerScreenName);
         		return null;
@@ -408,17 +438,18 @@ public class TwitterTool implements ViewTool {
      * 
      * @param ownerId    The list owner's id
      * @param slug       The list's slug
-     * @param page       The page to pull
-     * @param count      The number of items to pull per page
+     * @param pageParam  The page to pull
+     * @param countParam The number of items to pull per page
      * @return           A list of the last count statuses for the user's list
      */
-    public ResponseList<Status> getUserListStatuses(long ownerId, String slug, int page, int count) {
+    public ResponseList<Status> getUserListStatuses(long ownerId, String slug, int pageParam, int countParam) {
     	if(inited) {
-    		if(!UtilMethods.isSet(page)) page = 1;
-        	if(!UtilMethods.isSet(count)) count = 20;
+
+			final int page  = !UtilMethods.isSet(pageParam)?pageParam:1;
+			final int count = !UtilMethods.isSet(countParam)?countParam:20;
         	
         	// See if this username is a miss
-        	boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(ownerId));
+        	final boolean isMiss = TwitterToolMissCacheGroupHandler.INSTANCE.get(String.valueOf(ownerId));
         	if(isMiss) {
         		Logger.debug(this, "Miss Cached with userId: "+ownerId);
         		return null;

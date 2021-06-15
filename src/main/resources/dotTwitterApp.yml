@@ -1,0 +1,45 @@
+---
+name: "dotCMS Twitter App"
+description: "This App provides integration with Twitter"
+iconUrl: "https://avatars3.githubusercontent.com/u/1005263?s=400&u=dd87be9aba0f44feb1b82cab52a5b7fffe5119e3&v=4"
+allowExtraParameters: true
+params:
+  twitter4jDebug:
+    label: "Debug"
+    value: "false"
+    hidden: false
+    type: "BOOL"
+    hint: "Debug mode on"
+    required: true
+
+  twitter4jConsumerKey:
+    label: "Consumer Key"
+    value: "XXX"
+    hidden: true
+    type: "STRING"
+    hint: "Twitter Consumer Key"
+    required: true
+
+  twitter4jConsumerSecret:
+    label: "Consumer Secret"
+    value: "XXX"
+    hidden: true
+    type: "STRING"
+    hint: "Twitter Consumer Secret"
+    required: true
+
+  twitter4jAccessToken:
+    label: "Access Token"
+    value: "XXX"
+    hidden: true
+    type: "STRING"
+    hint: "Twitter Access Token"
+    required: true
+
+  twitter4jTokenSecret:
+    label: "Token Secret"
+    value: "XXX"
+    hidden: true
+    type: "STRING"
+    hint: "Twitter Token Secret"
+    required: true
